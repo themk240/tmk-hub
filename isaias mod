@@ -1,0 +1,1115 @@
+-- Is4i4smod Auto Duel
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local UserInputService  = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+local HttpService       = game:GetService("HttpService")
+
+local player        = Players.LocalPlayer
+local Camera        = Workspace.CurrentCamera
+
+local waypoints             = {}
+local currentWaypoint       = 1
+local moving                = false
+local connection
+local speedConnection
+local isWaitingForGrab      = false
+local grabDetectedThisSession = false
+
+local Character      = player.Character or player.CharacterAdded:Wait()
+local Humanoid       = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+local isSpinning        = false
+local spinForce         = nil
+local autoBatConnection = nil
+
+local antiRagdollEnabled      = false
+local currentCharacter        = nil
+local ragdollRemoteConnection = nil
+local moveConnection          = nil
+local playerModule, controls  = nil, nil
+
+pcall(function()
+    playerModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule"))
+    controls     = playerModule:GetControls()
+end)
+
+player.CharacterAdded:Connect(function(newChar)
+    Character        = newChar
+    Humanoid         = newChar:WaitForChild("Humanoid")
+    HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+end)
+
+-- =================== GUI ===================
+local gui = Instance.new("ScreenGui")
+gui.Name = "Is4i4smod"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 310, 0, 480)
+main.Position = UDim2.new(1, -330, 0.5, -240)
+main.BackgroundColor3 = Color3.fromRGB(16, 17, 22)
+main.BorderSizePixel = 0
+main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 16)
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Thickness = 1
+mainStroke.Color = Color3.fromRGB(40, 42, 55)
+mainStroke.Transparency = 0.3
+mainStroke.Parent = main
+
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 45)
+header.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+header.BorderSizePixel = 0
+header.Parent = main
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 16)
+
+local headerFix = Instance.new("Frame")
+headerFix.Size = UDim2.new(1, 0, 0, 14)
+headerFix.Position = UDim2.new(0, 0, 1, -14)
+headerFix.BackgroundColor3 = header.BackgroundColor3
+headerFix.BorderSizePixel = 0
+headerFix.Parent = header
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -75, 1, 0)
+title.Position = UDim2.new(0, 15, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Is4i4smod"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.new(1,1,1)
+title.Parent = header
+title.Active = true
+
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(88,101,242)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(67,181,129)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(250,166,26))
+}
+titleGradient.Parent = title
+
+local discordBtn = Instance.new("TextButton")
+discordBtn.Name = "DiscordBtn"
+discordBtn.Size = UDim2.new(0, 55, 0, 22)
+discordBtn.Position = UDim2.new(1, -125, 0.5, -11)
+discordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+discordBtn.Text = "Discord"
+discordBtn.Font = Enum.Font.GothamBold
+discordBtn.TextSize = 10
+discordBtn.TextColor3 = Color3.new(1,1,1)
+discordBtn.Parent = header
+Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0, 6)
+
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 50, 0, 22)
+minimizeBtn.Position = UDim2.new(1, -65, 0.5, -11)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(35, 37, 50)
+minimizeBtn.Text = "-"
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextSize = 16
+minimizeBtn.TextColor3 = Color3.new(1, 1, 1)
+minimizeBtn.Parent = header
+Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 6)
+
+local isMinimized = false
+local fullHeight = 480
+
+discordBtn.MouseButton1Click:Connect(function()
+    local url = "https://discord.gg/wCuwCHHXw"
+    if setclipboard then
+        setclipboard(url)
+        local oldText = discordBtn.Text
+        discordBtn.Text = "Copied!"
+        discordBtn.BackgroundColor3 = Color3.fromRGB(67, 181, 129)
+        task.wait(2)
+        discordBtn.Text = oldText
+        discordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        TweenService:Create(titleGradient, TweenInfo.new(6, Enum.EasingStyle.Linear), {Rotation = titleGradient.Rotation + 360}):Play()
+        task.wait(6)
+    end
+end)
+
+local dragToggle, dragStart, startPos
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragToggle = true
+        dragStart = input.Position
+        startPos = main.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragToggle = false end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragToggle then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    elseif input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- =================== HELPER ===================
+local function makeToggleRow(parent, yPos, labelText)
+    local container = Instance.new("TextButton")
+    container.Size = UDim2.new(1, -30, 0, 38)
+    container.Position = UDim2.new(0, 15, 0, yPos)
+    container.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+    container.AutoButtonColor = false
+    container.Text = ""
+    container.Parent = parent
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 10)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -50, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.Font = Enum.Font.GothamSemibold
+    label.TextSize = 12
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextColor3 = Color3.fromRGB(150, 150, 150)
+    label.Parent = container
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 14, 0, 14)
+    dot.Position = UDim2.new(1, -24, 0.5, -7)
+    dot.BackgroundColor3 = Color3.fromRGB(237, 66, 69)
+    dot.Parent = container
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    return container, label, dot
+end
+
+-- =================== DISPLAYS ===================
+local speedContainer = Instance.new("Frame")
+speedContainer.Size = UDim2.new(0.5, -20, 0, 38)
+speedContainer.Position = UDim2.new(0, 15, 0, 55)
+speedContainer.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+speedContainer.Parent = main
+Instance.new("UICorner", speedContainer).CornerRadius = UDim.new(0, 10)
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(1, -8, 1, 0)
+speedLabel.Position = UDim2.new(0, 8, 0, 0)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Speed: --"
+speedLabel.Font = Enum.Font.GothamSemibold
+speedLabel.TextSize = 12
+speedLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+speedLabel.Parent = speedContainer
+
+local statusContainer = Instance.new("Frame")
+statusContainer.Size = UDim2.new(0.5, -20, 0, 38)
+statusContainer.Position = UDim2.new(0.5, 5, 0, 55)
+statusContainer.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+statusContainer.Parent = main
+Instance.new("UICorner", statusContainer).CornerRadius = UDim.new(0, 10)
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -8, 1, 0)
+statusLabel.Position = UDim2.new(0, 8, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "im ready boi"
+statusLabel.Font = Enum.Font.GothamSemibold
+statusLabel.TextSize = 11
+statusLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+statusLabel.Parent = statusContainer
+
+-- =================== TOGGLES ===================
+-- Columna izquierda: yPos 105, 155, 205 | Columna derecha: yPos 105, 155, 205
+local function makeToggleRow2Col(parent, xScale, xOffset, yPos, labelText)
+    local container = Instance.new("TextButton")
+    container.Size = UDim2.new(0.5, -20, 0, 38)
+    container.Position = UDim2.new(xScale, xOffset, 0, yPos)
+    container.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+    container.AutoButtonColor = false
+    container.Text = ""
+    container.Active = true
+    container.Parent = parent
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 10)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -24, 1, 0)
+    label.Position = UDim2.new(0, 8, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.Font = Enum.Font.GothamSemibold
+    label.TextSize = 11
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextColor3 = Color3.fromRGB(150, 150, 150)
+    label.Active = false
+    label.Parent = container
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 12, 0, 12)
+    dot.Position = UDim2.new(1, -18, 0.5, -6)
+    dot.BackgroundColor3 = Color3.fromRGB(237, 66, 69)
+    dot.Active = false
+    dot.Parent = container
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+    return container, label, dot
+end
+
+local spinContainer,       spinLabel,       spinDot       = makeToggleRow2Col(main, 0,   15,  105, "Spin Bot")
+local batContainer,        batLabel,        batDot        = makeToggleRow2Col(main, 0,   15,  153, "Auto Bat")
+local autoTargetContainer, autoTargetLabel, autoTargetDot = makeToggleRow2Col(main, 0,   15,  201, "Speed")
+local ragdollContainer,    ragdollLabel,    ragdollDot    = makeToggleRow2Col(main, 0.5,  5,  105, "Anti Ragdoll")
+local chaseContainer,      chaseLabel,      chaseDot      = makeToggleRow2Col(main, 0.5,  5,  153, "Auto Chase")
+local grabContainer,       grabLabel,       grabDot       = makeToggleRow2Col(main, 0.5,  5,  201, "Auto Grab")
+
+-- =================== JUMP POWER ===================
+local jumpContainer = Instance.new("Frame")
+jumpContainer.Size = UDim2.new(1, -30, 0, 48)
+jumpContainer.Position = UDim2.new(0, 15, 0, 255)
+jumpContainer.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+jumpContainer.Parent = main
+Instance.new("UICorner", jumpContainer).CornerRadius = UDim.new(0, 10)
+
+local jumpTitleLabel = Instance.new("TextLabel")
+jumpTitleLabel.Size = UDim2.new(0.5, 0, 0.5, 0)
+jumpTitleLabel.Position = UDim2.new(0, 10, 0, 0)
+jumpTitleLabel.BackgroundTransparency = 1
+jumpTitleLabel.Text = "Jump Power"
+jumpTitleLabel.Font = Enum.Font.GothamSemibold
+jumpTitleLabel.TextSize = 12
+jumpTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+jumpTitleLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+jumpTitleLabel.Parent = jumpContainer
+
+local jumpValueLabel = Instance.new("TextLabel")
+jumpValueLabel.Size = UDim2.new(0.5, -10, 0.5, 0)
+jumpValueLabel.Position = UDim2.new(0.5, 0, 0, 0)
+jumpValueLabel.BackgroundTransparency = 1
+jumpValueLabel.Text = "50"
+jumpValueLabel.Font = Enum.Font.GothamBold
+jumpValueLabel.TextSize = 12
+jumpValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+jumpValueLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+jumpValueLabel.Parent = jumpContainer
+
+local jumpDecBtn = Instance.new("TextButton")
+jumpDecBtn.Size = UDim2.new(0, 30, 0, 22)
+jumpDecBtn.Position = UDim2.new(0, 10, 1, -28)
+jumpDecBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+jumpDecBtn.Text = "-"
+jumpDecBtn.Font = Enum.Font.GothamBold
+jumpDecBtn.TextSize = 14
+jumpDecBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
+jumpDecBtn.Parent = jumpContainer
+Instance.new("UICorner", jumpDecBtn).CornerRadius = UDim.new(0, 6)
+
+local jumpIncBtn = Instance.new("TextButton")
+jumpIncBtn.Size = UDim2.new(0, 30, 0, 22)
+jumpIncBtn.Position = UDim2.new(0, 46, 1, -28)
+jumpIncBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+jumpIncBtn.Text = "+"
+jumpIncBtn.Font = Enum.Font.GothamBold
+jumpIncBtn.TextSize = 14
+jumpIncBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
+jumpIncBtn.Parent = jumpContainer
+Instance.new("UICorner", jumpIncBtn).CornerRadius = UDim.new(0, 6)
+
+local jumpResetBtn = Instance.new("TextButton")
+jumpResetBtn.Size = UDim2.new(0, 55, 0, 22)
+jumpResetBtn.Position = UDim2.new(1, -65, 1, -28)
+jumpResetBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+jumpResetBtn.Text = "Reset"
+jumpResetBtn.Font = Enum.Font.GothamBold
+jumpResetBtn.TextSize = 11
+jumpResetBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
+jumpResetBtn.Parent = jumpContainer
+Instance.new("UICorner", jumpResetBtn).CornerRadius = UDim.new(0, 6)
+
+-- =================== KEYBIND ===================
+local keybindBtn = Instance.new("TextButton")
+keybindBtn.Size = UDim2.new(1, -30, 0, 30)
+keybindBtn.Position = UDim2.new(0, 15, 0, 315)
+keybindBtn.BackgroundColor3 = Color3.fromRGB(22, 24, 32)
+keybindBtn.Text = "Keybind Auto Bat: [ None ]"
+keybindBtn.Font = Enum.Font.GothamBold
+keybindBtn.TextSize = 11
+keybindBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+keybindBtn.Parent = main
+Instance.new("UICorner", keybindBtn).CornerRadius = UDim.new(0, 10)
+
+-- =================== AUTO DUEL BUTTON ===================
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(1, -30, 0, 42)
+button.Position = UDim2.new(0, 15, 0, 355)
+button.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+button.Text = "START AUTO DUEL"
+button.Font = Enum.Font.GothamBold
+button.TextSize = 13
+button.TextColor3 = Color3.new(1,1,1)
+button.Parent = main
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 10)
+
+-- =================== MINIMIZAR ===================
+local function setContentVisible(visible)
+    speedContainer.Visible       = visible
+    statusContainer.Visible      = visible
+    spinContainer.Visible        = visible
+    batContainer.Visible         = visible
+    autoTargetContainer.Visible  = visible
+    ragdollContainer.Visible     = visible
+    chaseContainer.Visible       = visible
+    grabContainer.Visible        = visible
+    jumpContainer.Visible        = visible
+    keybindBtn.Visible           = visible
+    button.Visible               = visible
+end
+
+minimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        minimizeBtn.Text = "+"
+        setContentVisible(false)
+        TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 310, 0, 45)
+        }):Play()
+    else
+        minimizeBtn.Text = "-"
+        TweenService:Create(main, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 310, 0, fullHeight)
+        }):Play()
+        task.delay(0.2, function() setContentVisible(true) end)
+    end
+end)
+
+-- =================== LÓGICA AUTO DUEL ===================
+local function stopMoving()
+    if connection then connection:Disconnect() end
+    moving = false; isWaitingForGrab = false; grabDetectedThisSession = false
+    button.Text = "START AUTO DUEL"
+    button.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    if statusLabel.Text ~= "FINISHED!" then
+        statusLabel.Text = "im ready boi"
+        statusLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+    end
+end
+
+speedConnection = RunService.Heartbeat:Connect(function()
+    local char = player.Character
+    local hum = char and char:FindFirstChild("Humanoid")
+    if hum then
+        speedLabel.Text = "Speed: "..tostring(math.floor(hum.WalkSpeed))
+        if hum.WalkSpeed < 23 then
+            speedLabel.TextColor3 = Color3.fromRGB(237, 66, 69)
+            if isWaitingForGrab and not grabDetectedThisSession then
+                task.wait(0.3)
+                isWaitingForGrab = false; grabDetectedThisSession = true
+                statusLabel.Text = "Yuliano bot bringed you at: "..currentWaypoint
+                statusLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+            end
+        else
+            speedLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+        end
+    end
+end)
+
+local function moveToWaypoint()
+    if connection then connection:Disconnect() end
+    connection = RunService.Stepped:Connect(function()
+        if not moving or isWaitingForGrab then return end
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local wp = waypoints[currentWaypoint]
+        local dist = (root.Position - wp.position).Magnitude
+        if dist < 5 then
+            if (currentWaypoint == 4 or currentWaypoint == 6) and not grabDetectedThisSession then
+                isWaitingForGrab = true
+                statusLabel.Text = "Grab the pet please..."
+                statusLabel.TextColor3 = Color3.fromRGB(250, 166, 26)
+                root.Velocity = Vector3.zero
+                return
+            end
+            if currentWaypoint == #waypoints then
+                statusLabel.Text = "FINISHED!"
+                statusLabel.TextColor3 = Color3.fromRGB(67, 181, 129)
+                stopMoving(); return
+            end
+            currentWaypoint += 1
+            statusLabel.Text = "Yuliano bot bringed you at: "..currentWaypoint
+        else
+            local dir = (wp.position - root.Position).Unit
+            root.Velocity = Vector3.new(dir.X * wp.speed, root.Velocity.Y, dir.Z * wp.speed)
+        end
+    end)
+end
+
+local function startDuel()
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    moving = true; grabDetectedThisSession = false
+    button.Text = "STOP AUTO DUEL"
+    button.BackgroundColor3 = Color3.fromRGB(237, 66, 69)
+    if (root.Position - Vector3.new(-475,-7,96)).Magnitude > (root.Position - Vector3.new(-474,-7,23)).Magnitude then
+        waypoints = {
+            {position = Vector3.new(-475,-7,96), speed=59},
+            {position = Vector3.new(-483,-5,95), speed=59},
+            {position = Vector3.new(-487,-5,95), speed=55},
+            {position = Vector3.new(-492,-5,95), speed=55},
+            {position = Vector3.new(-473,-7,95), speed=29},
+            {position = Vector3.new(-473,-7,11), speed=29}
+        }
+    else
+        waypoints = {
+            {position = Vector3.new(-474,-7,23), speed=55},
+            {position = Vector3.new(-484,-5,24), speed=55},
+            {position = Vector3.new(-488,-5,24), speed=55},
+            {position = Vector3.new(-493,-5,25), speed=55},
+            {position = Vector3.new(-473,-7,25), speed=29},
+            {position = Vector3.new(-474,-7,112), speed=29}
+        }
+    end
+    currentWaypoint = 1
+    moveToWaypoint()
+end
+
+button.MouseButton1Click:Connect(function()
+    if moving or isWaitingForGrab then stopMoving() else startDuel() end
+end)
+
+-- =================== SPIN BOT ===================
+local function toggleSpinBot()
+    isSpinning = not isSpinning
+    if isSpinning then
+        TweenService:Create(spinDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(spinLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        Humanoid.AutoRotate = false
+        local rootAttachment = HumanoidRootPart:FindFirstChild("RootAttachment")
+        if not rootAttachment then
+            rootAttachment = Instance.new("Attachment")
+            rootAttachment.Name = "RootAttachment"
+            rootAttachment.Parent = HumanoidRootPart
+        end
+        spinForce then spinForce:Destroy(); spinForce = nil end
+    end
+end
+spinContainer.MouseButton1Click:Connect(toggleSpinBot)
+
+-- =================== AUTO BAT ===================
+local function toggleAutoBat()
+    if autoBatConnection then
+        autoBatConnection:Disconnect(); autoBatConnection = nil
+        TweenService:Create(batDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(237, 66, 69)}):Play()
+        TweenService:Create(batLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+    else
+        TweenService:Create(batDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(batLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        autoBatConnection = RunService.RenderStepped:Connect(function()
+            local character = player.Character
+            if not character then return end
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if not humanoid then return end
+            local bat = player.Backpack:FindFirstChild("Bat")
+            if bat then humanoid:EquipTool(bat) end
+            local equippedBat = character:FindFirstChild("Bat")
+            if equippedBat then equippedBat:Activate() end
+        end)
+    end
+end
+batContainer.MouseButton1Click:Connect(toggleAutoBat)
+
+-- =================== SPEED ===================
+local speedEnabled      = false
+local targetSpeed       = 28
+local autoTargetConnection = nil
+
+local function toggleAutoTarget()
+    speedEnabled = not speedEnabled
+    if speedEnabled then
+        TweenService:Create(autoTargetDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(autoTargetLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        autoTargetConnection = RunService.Heartbeat:Connect(function()
+            local char = player.Character
+            if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum or not hrp then return end
+            if hum.MoveDirection.Magnitude > 0 then
+                hrp.Velocity = Vector3.new(
+                    hum.MoveDirection.X * targetSpeed,
+                    hrp.Velocity.Y,
+                    hum.MoveDirection.Z * targetSpeed
+                )
+            end
+        end)
+    else
+        TweenService:Create(autoTargetDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(237, 66, 69)}):Play()
+        TweenService:Create(autoTargetLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+        if autoTargetConnection then autoTargetConnection:Disconnect(); autoTargetConnection = nil end
+    end
+end
+autoTargetContainer.MouseButton1Click:Connect(toggleAutoTarget)
+
+-- =================== ANTI RAGDOLL ===================
+local function cleanupRagdoll()
+    if currentCharacter then
+        local root = currentCharacter:FindFirstChild("HumanoidRootPart")
+        if root then
+            local anchor = root:FindFirstChild("RagdollAnchor")
+            if anchor then anchor:Destroy() end
+        end
+    end
+    if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
+end
+
+local function disconnectRemote()
+    if ragdollRemoteConnection then ragdollRemoteConnection:Disconnect(); ragdollRemoteConnection = nil end
+end
+
+local function setupAntiRagdoll(char)
+    currentCharacter = char
+    cleanupRagdoll(); disconnectRemote()
+    local humanoid = char:WaitForChild("Humanoid", 5)
+    local root     = char:WaitForChild("HumanoidRootPart", 5)
+    local head     = char:WaitForChild("Head", 5)
+    if not (humanoid and root and head) then return end
+    local ragdollRemote = ReplicatedStorage:WaitForChild("Packages", 8)
+    if not ragdollRemote then return end
+    ragdollRemote = ragdollRemote:WaitForChild("Ragdoll", 5)
+    if not ragdollRemote then return end
+    ragdollRemote = ragdollRemote:WaitForChild("Ragdoll", 5)
+    if not ragdollRemote or not ragdollRemote:IsA("RemoteEvent") then return end
+    ragdollRemoteConnection = ragdollRemote.OnClientEvent:Connect(function(arg1, arg2)
+        if not antiRagdollEnabled then return end
+        if arg1 == "Make" or arg2 == "manualM" then
+            humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+            Camera.CameraSubject = head; root.CanCollide = false
+            if controls then pcall(controls.Enable, controls) end
+            cleanupRagdoll()
+            local anchor = Instance.new("BodyPosition")
+            anchor.Name = "RagdollAnchor"; anchor.MaxForce = Vector3.new(1e6,1e6,1e6)
+            anchor.P = 5000; anchor.D = 1000; anchor.Position = root.Position; anchor.Parent = root
+            moveConnection = RunService.RenderStepped:Connect(function()
+                if not antiRagdollEnabled or not anchor or not anchor.Parent then
+                    if moveConnection then moveConnection:Disconnect(); moveConnection = nil end; return
+                end
+                local md = humanoid.MoveDirection
+                anchor.Position = md.Magnitude > 0 and root.Position + md.Unit * 16 or root.Position
+            end)
+        end
+        if arg1 == "Destroy" or arg2 == "manualD" then
+            humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            Camera.CameraSubject = humanoid; root.CanCollide = true
+            if controls then pcall(controls.Enable, controls) end
+            cleanupRagdoll()
+        end
+    end)
+end
+
+local function toggleAntiRagdoll()
+    antiRagdollEnabled = not antiRagdollEnabled
+    if antiRagdollEnabled then
+        TweenService:Create(ragdollDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(ragdollLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        if player.Character then setupAntiRagdoll(player.Character) end
+    else
+        TweenService:Create(ragdollDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(237, 66, 69)}):Play()
+        TweenService:Create(ragdollLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+        cleanupRagdoll(); disconnectRemote()
+    end
+end
+ragdollContainer.MouseButton1Click:Connect(toggleAntiRagdoll)
+
+player.CharacterAdded:Connect(function(char)
+    if antiRagdollEnabled then setupAntiRagdoll(char) end
+end)
+player.CharacterRemoving:Connect(function()
+    cleanupRagdoll(); disconnectRemote(); currentCharacter = nil
+end)
+
+-- =================== AUTO CHASE ===================
+local isChasing = false
+local chaseConnection = nil
+
+local function getClosestPlayer()
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    local closest, closestDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local targetRoot = p.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot then
+                local dist = (root.Position - targetRoot.Position).Magnitude
+                if dist < closestDist then closestDist = dist; closest = p end
+            end
+        end
+    end
+    return closest
+end
+
+local function toggleChase()
+    isChasing = not isChasing
+    if isChasing then
+        TweenService:Create(chaseDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(chaseLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        chaseConnection = RunService.Heartbeat:Connect(function()
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not hum or not root then return end
+            local target = getClosestPlayer()
+            if not target or not target.Character then return end
+            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            if not targetRoot then return end
+            local dist = (root.Position - targetRoot.Position).Magnitude
+            hum:MoveTo(targetRoot.Position)
+            if dist < 6 then
+                local bat = player.Backpack:FindFirstChild("Bat")
+                if bat then hum:EquipTool(bat) end
+                local equippedBat = char:FindFirstChild("Bat")
+                if equippedBat then equippedBat:Activate() end
+            end
+        end)
+    else
+        TweenService:Create(chaseDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(237, 66, 69)}):Play()
+        TweenService:Create(chaseLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+        if chaseConnection then chaseConnection:Disconnect(); chaseConnection = nil end
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:MoveTo(player.Character.HumanoidRootPart.Position) end
+    end
+end
+chaseContainer.MouseButton1Click:Connect(toggleChase)
+
+-- =================== JUMP POWER ===================
+local DEFAULT_JUMP = 50
+local jumpPower = DEFAULT_JUMP
+
+local function applyJump(val)
+    jumpPower = math.clamp(val, 0, 500)
+    jumpValueLabel.Text = tostring(jumpPower)
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.UseJumpPower = true; hum.JumpPower = jumpPower end
+end
+
+player.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid")
+    hum.UseJumpPower = true; hum.JumpPower = jumpPower
+end)
+
+jumpIncBtn.MouseButton1Click:Connect(function() applyJump(jumpPower + 10) end)
+jumpDecBtn.MouseButton1Click:Connect(function() applyJump(jumpPower - 10) end)
+jumpResetBtn.MouseButton1Click:Connect(function() applyJump(DEFAULT_JUMP) end)
+applyJump(DEFAULT_JUMP)
+
+-- =================== KEYBIND ===================
+local assignedKey     = nil
+local listeningForKey = false
+
+keybindBtn.MouseButton1Click:Connect(function()
+    listeningForKey = true
+    keybindBtn.Text = "Press any key..."
+    keybindBtn.TextColor3 = Color3.fromRGB(255, 215, 0)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if listeningForKey then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            assignedKey = input.KeyCode; listeningForKey = false
+            keybindBtn.Text = "Keybind Auto Bat: [ "..input.KeyCode.Name.." ]"
+            keybindBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+        end
+    elseif assignedKey and input.KeyCode == assignedKey and not gameProcessed then
+        toggleAutoBat()
+    end
+end)
+
+-- =================== AUTO GRAB (Chilli Galaxy) ===================
+if not getconnections then getconnections = function() return {} end end
+
+local AnimalsData = nil
+pcall(function()
+    AnimalsData = require(ReplicatedStorage:WaitForChild("Datas"):WaitForChild("Animals"))
+end)
+
+local autoGrabEnabled       = false
+local AG_PROX_RADIUS        = 20
+local agAllAnimals          = {}
+local agPromptCache         = {}
+local agInternalCache       = {}
+local agLastTargetUID       = nil
+local agLastPlayerPos       = nil
+local agPlayerVelocity      = Vector3.zero
+local agIsStealing          = false
+local agStealProgress       = 0
+local agCurrentTarget       = nil
+local agStealStartTime      = 0
+local agStealConn           = nil
+local agVelocityConn        = nil
+
+-- Círculo de radio en el mundo 3D
+local AG_CIRCLE_RADIUS  = AG_PROX_RADIUS
+local AG_PART_THICKNESS = 0.3
+local AG_PART_HEIGHT    = 0.2
+local AG_PART_COLOR     = Color3.fromRGB(0, 255, 255)
+local AG_PARTS_COUNT    = 65
+local agCircleParts     = {}
+local agCircleEnabled   = true
+
+local function agGetHRP()
+    local c = player.Character
+    if not c then return nil end
+    return c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
+end
+
+local function agIsMyBase(plotName)
+    local plots = workspace:FindFirstChild("Plots")
+    local plot = plots and plots:FindFirstChild(plotName)
+    if not plot then return false end
+    local sign = plot:FindFirstChild("PlotSign")
+    if sign then
+        local yb = sign:FindFirstChild("YourBase")
+        if yb and yb:IsA("BillboardGui") then return yb.Enabled end
+    end
+    return false
+end
+
+local function agScanPlot(plot)
+    if not plot or not plot:IsA("Model") then return end
+    if agIsMyBase(plot.Name) then return end
+    local podiums = plot:FindFirstChild("AnimalPodiums")
+    if not podiums then return end
+    for _, podium in ipairs(podiums:GetChildren()) do
+        if podium:IsA("Model") and podium:FindFirstChild("Base") then
+            local animalName = "Unknown"
+            local spawnF = podium.Base:FindFirstChild("Spawn")
+            if spawnF then
+                for _, child in ipairs(spawnF:GetChildren()) do
+                    if child:IsA("Model") and child.Name ~= "PromptAttachment" then
+                        animalName = child.Name
+                        if AnimalsData then
+                            local info = AnimalsData[animalName]
+                            if info and info.DisplayName then animalName = info.DisplayName end
+                        end
+                        break
+                    end
+                end
+            end
+            table.insert(agAllAnimals, {
+                name = animalName,
+                plot = plot.Name,
+                slot = podium.Name,
+                worldPosition = podium:GetPivot().Position,
+                uid = plot.Name .. "_" .. podium.Name,
+            })
+        end
+    end
+end
+
+local function agInitScanner()
+    task.wait(2)
+    local plots = workspace:WaitForChild("Plots", 10)
+    if not plots then return end
+    agAllAnimals = {}
+    for _, plot in ipairs(plots:GetChildren()) do
+        if plot:IsA("Model") then agScanPlot(plot) end
+    end
+    plots.ChildAdded:Connect(function(plot)
+        if plot:IsA("Model") then task.wait(0.5); agScanPlot(plot) end
+    end)
+    task.spawn(function()
+        while task.wait(5) do
+            if not autoGrabEnabled then continue end
+            agAllAnimals = {}
+            for _, plot in ipairs(plots:GetChildren()) do
+                if plot:IsA("Model") then agScanPlot(plot) end
+            end
+        end
+    end)
+end
+
+local function agFindPrompt(animalData)
+    if not animalData then return nil end
+    local cached = agPromptCache[animalData.uid]
+    if cached and cached.Parent then return cached end
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    local plot = plots:FindFirstChild(animalData.plot)
+    if not plot then return nil end
+    local podiums = plot:FindFirstChild("AnimalPodiums")
+    if not podiums then return nil end
+    local podium = podiums:FindFirstChild(animalData.slot)
+    if not podium then return nil end
+    local base = podium:FindFirstChild("Base")
+    if not base then return nil end
+    local spawnF = base:FindFirstChild("Spawn")
+    if not spawnF then return nil end
+    local attach = spawnF:FindFirstChild("PromptAttachment")
+    if attach then
+        for _, p in ipairs(attach:GetChildren()) do
+            if p:IsA("ProximityPrompt") then
+                agPromptCache[animalData.uid] = p; return p
+            end
+        end
+    end
+    return nil
+end
+
+local function agBuildCallbacks(prompt)
+    if agInternalCache[prompt] then return end
+    local data = { holdCallbacks = {}, triggerCallbacks = {}, ready = true }
+    local ok1, conns1 = pcall(getconnections, prompt.PromptButtonHoldBegan)
+    if ok1 and type(conns1) == "table" then
+        for _, c in ipairs(conns1) do
+            if type(c.Function) == "function" then table.insert(data.holdCallbacks, c.Function) end
+        end
+    end
+    local ok2, conns2 = pcall(getconnections, prompt.Triggered)
+    if ok2 and type(conns2) == "table" then
+        for _, c in ipairs(conns2) do
+            if type(c.Function) == "function" then table.insert(data.triggerCallbacks, c.Function) end
+        end
+    end
+    if #data.holdCallbacks > 0 or #data.triggerCallbacks > 0 then
+        agInternalCache[prompt] = data
+    end
+end
+
+local function agExecuteSteal(prompt, animalData)
+    local data = agInternalCache[prompt]
+    if not data or not data.ready then return false end
+    data.ready = false; agIsStealing = true; agStealProgress = 0
+    agCurrentTarget = animalData; agStealStartTime = tick()
+    task.spawn(function()
+        for _, fn in ipairs(data.holdCallbacks) do task.spawn(fn) end
+        local startTime = tick()
+        while tick() - startTime < 1.3 do
+            agStealProgress = (tick() - startTime) / 1.3
+            task.wait(0.05)
+        end
+        agStealProgress = 1
+        for _, fn in ipairs(data.triggerCallbacks) do task.spawn(fn) end
+        task.wait(0.1); data.ready = true
+        task.wait(0.3); agIsStealing = false; agStealProgress = 0; agCurrentTarget = nil
+    end)
+    return true
+end
+
+local function agAttemptSteal(prompt, animalData)
+    if not prompt or not prompt.Parent then return false end
+    local hrp = agGetHRP()
+    if not hrp then return false end
+    if (hrp.Position - animalData.worldPosition).Magnitude > AG_PROX_RADIUS then return false end
+    agBuildCallbacks(prompt)
+    if not agInternalCache[prompt] then return false end
+    return agExecuteSteal(prompt, animalData)
+end
+
+local function agGetNearest()
+    local hrp = agGetHRP()
+    if not hrp then return nil end
+    local nearest, minDist = nil, math.huge
+    for _, a in ipairs(agAllAnimals) do
+        if agIsMyBase(a.plot) then continue end
+        if a.worldPosition then
+            local d = (hrp.Position - a.worldPosition).Magnitude
+            if d < minDist then minDist = d; nearest = a end
+        end
+    end
+    return nearest
+end
+
+local function agStartLoop()
+    if agStealConn then agStealConn:Disconnect() end
+    if agVelocityConn then agVelocityConn:Disconnect() end
+    agVelocityConn = RunService.Heartbeat:Connect(function()
+        local hrp = agGetHRP()
+        if not hrp then return end
+        if agLastPlayerPos then
+            agPlayerVelocity = (hrp.Position - agLastPlayerPos) / 0.016
+        end
+        agLastPlayerPos = hrp.Position
+    end)
+    agStealConn = RunService.Heartbeat:Connect(function()
+        if not autoGrabEnabled then return end
+        if agIsStealing then return end
+        local target = agGetNearest()
+        if not target then return end
+        if agLastTargetUID ~= target.uid then agLastTargetUID = target.uid end
+        local prompt = agPromptCache[target.uid]
+        if not prompt or not prompt.Parent then
+            prompt = agFindPrompt(target)
+        end
+        if prompt then agAttemptSteal(prompt, target) end
+    end)
+end
+
+-- Círculo 3D en el mundo
+local function agCreateCircle(character)
+    for _, part in ipairs(agCircleParts) do if part then part:Destroy() end end
+    agCircleParts = {}
+    AG_CIRCLE_RADIUS = AG_PROX_RADIUS
+    local root = character:WaitForChild("HumanoidRootPart")
+    local points = {}
+    for i = 0, AG_PARTS_COUNT - 1 do
+        local angle = math.rad(i * 360 / AG_PARTS_COUNT)
+        table.insert(points, Vector3.new(math.cos(angle), 0, math.sin(angle)) * AG_CIRCLE_RADIUS)
+    end
+    for i = 1, #points do
+        local nextIdx = i % #points + 1
+        local p1, p2 = points[i], points[nextIdx]
+        local part = Instance.new("Part")
+        part.Anchored = true; part.CanCollide = false
+        part.Size = Vector3.new((p2 - p1).Magnitude, AG_PART_HEIGHT, AG_PART_THICKNESS)
+        part.Color = AG_PART_COLOR; part.Material = Enum.Material.Neon
+        part.Transparency = 0.3
+        part.TopSurface = Enum.SurfaceType.Smooth
+        part.BottomSurface = Enum.SurfaceType.Smooth
+        part.Parent = workspace
+        table.insert(agCircleParts, part)
+    end
+end
+
+local function agUpdateCircle(character)
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local points = {}
+    for i = 0, AG_PARTS_COUNT - 1 do
+        local angle = math.rad(i * 360 / AG_PARTS_COUNT)
+        table.insert(points, Vector3.new(math.cos(angle), 0, math.sin(angle)) * AG_CIRCLE_RADIUS)
+    end
+    for i, part in ipairs(agCircleParts) do
+        local nextIdx = i % #points + 1
+        local p1, p2 = points[i], points[nextIdx]
+        local center = (p1 + p2) / 2 + root.Position
+        part.CFrame = CFrame.new(center, center + Vector3.new(p2.X - p1.X, 0, p2.Z - p1.Z)) * CFrame.Angles(0, math.pi/2, 0)
+    end
+end
+
+local function agOnCharacterAdded(character)
+    if agCircleEnabled and autoGrabEnabled then
+        agCreateCircle(character)
+        RunService:BindToRenderStep("AGCircleFollow", Enum.RenderPriority.Camera.Value + 1, function()
+            agUpdateCircle(character)
+        end)
+    end
+end
+
+-- Barra de progreso del grab (integrada en el panel principal)
+local grabProgressBg = Instance.new("Frame")
+grabProgressBg.Size = UDim2.new(0.5, -20, 0, 5)
+grabProgressBg.Position = UDim2.new(0.5, 5, 0, 243)
+grabProgressBg.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+grabProgressBg.BorderSizePixel = 0
+grabProgressBg.Visible = false
+grabProgressBg.Active = false
+grabProgressBg.Parent = main
+Instance.new("UICorner", grabProgressBg).CornerRadius = UDim.new(1, 0)
+
+local grabProgressFill = Instance.new("Frame")
+grabProgressFill.Size = UDim2.new(0, 0, 1, 0)
+grabProgressFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+grabProgressFill.BorderSizePixel = 0
+grabProgressFill.Parent = grabProgressBg
+Instance.new("UICorner", grabProgressFill).CornerRadius = UDim.new(1, 0)
+
+local grabFillGradient = Instance.new("UIGradient")
+grabFillGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 50)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 150, 50)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 50, 50))
+})
+grabFillGradient.Parent = grabProgressFill
+
+-- Stroke animado en el grabContainer
+local grabStroke = Instance.new("UIStroke")
+grabStroke.Thickness = 1.3
+grabStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+grabStroke.Color = Color3.fromRGB(255, 255, 255)
+grabStroke.Enabled = false
+grabStroke.Parent = grabContainer
+
+local grabStrokeGradient = Instance.new("UIGradient")
+grabStrokeGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 50, 50)),
+    ColorSequenceKeypoint.new(0.25, Color3.fromRGB(0, 0, 0)),
+    ColorSequenceKeypoint.new(0.50, Color3.fromRGB(255, 50, 50)),
+    ColorSequenceKeypoint.new(0.75, Color3.fromRGB(0, 0, 0)),
+    ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 50, 50))
+})
+grabStrokeGradient.Parent = grabStroke
+
+-- Frame transparente encima para capturar clics sin ser bloqueado por el stroke
+local grabClickOverlay = Instance.new("TextButton")
+grabClickOverlay.Size = UDim2.new(1, 0, 1, 0)
+grabClickOverlay.BackgroundTransparency = 1
+grabClickOverlay.Text = ""
+grabClickOverlay.ZIndex = grabContainer.ZIndex + 2
+grabClickOverlay.Parent = grabContainer
+
+task.spawn(function()
+    while true do
+        grabStrokeGradient.Rotation = grabStrokeGradient.Rotation + 2
+        task.wait(0.02)
+    end
+end)
+
+-- Loop de progreso
+local agProgressTween = nil
+task.spawn(function()
+    while task.wait(0.03) do
+        if agIsStealing then
+            grabProgressBg.Visible = true
+            if agProgressTween then agProgressTween:Cancel() end
+            agProgressTween = TweenService:Create(grabProgressFill, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {Size = UDim2.new(agStealProgress, 0, 1, 0)})
+            agProgressTween:Play()
+        else
+            if agProgressTween then agProgressTween:Cancel(); agProgressTween = nil end
+            if grabProgressFill.Size.X.Scale > 0 then
+                grabProgressFill.Size = UDim2.new(math.max(0, grabProgressFill.Size.X.Scale - 0.03), 0, 1, 0)
+            else
+                grabProgressBg.Visible = false
+            end
+        end
+    end
+end)
+
+local function toggleAutoGrab()
+    autoGrabEnabled = not autoGrabEnabled
+    if autoGrabEnabled then
+        TweenService:Create(grabDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        TweenService:Create(grabLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(67, 181, 129)}):Play()
+        grabStroke.Enabled = true
+        agPromptCache = {}; agInternalCache = {}; agIsStealing = false; agStealProgress = 0
+        task.spawn(agStartLoop)
+        task.spawn(agInitScanner)
+        if player.Character then
+            agCreateCircle(player.Character)
+            RunService:BindToRenderStep("AGCircleFollow", Enum.RenderPriority.Camera.Value + 1, function()
+                agUpdateCircle(player.Character)
+            end)
+        end
+    else
+        TweenService:Create(grabDot, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(237, 66, 69)}):Play()
+        TweenService:Create(grabLabel, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(150, 150, 150)}):Play()
+        grabStroke.Enabled = false
+        agIsStealing = false; agStealProgress = 0; agCurrentTarget = nil
+        if agStealConn then agStealConn:Disconnect(); agStealConn = nil end
+        if agVelocityConn then agVelocityConn:Disconnect(); agVelocityConn = nil end
+        for _, part in ipairs(agCircleParts) do if part then part:Destroy() end end
+        agCircleParts = {}
+        RunService:UnbindFromRenderStep("AGCircleFollow")
+        agPromptCache = {}
+    end
+end
+
+grabContainer.MouseButton1Click:Connect(toggleAutoGrab)
+grabClickOverlay.MouseButton1Click:Connect(toggleAutoGrab)
+player.CharacterAdded:Connect(agOnCharacterAdded)
